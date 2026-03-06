@@ -73,6 +73,125 @@ function draw(airlineFilter) {
     document.getElementById("chart").appendChild(createChart(hierarchyData));
 }
 
+function createChart(hierarchyData) {
+    const width = 900;
+    const radius = width / 2;
+
+    const root = d3.cluster()
+        .size([2 * Math.PI, radius - 120])(
+            bilink(d3.hierarchy(hierarchyData))
+        );
+
+    const line = d3.lineRadial()
+        .curve(d3.curveBundle.beta(0.85))
+        .radius(d => d.y)
+        .angle(d => d.x);
+
+    const svg = d3.create("svg")
+        .attr("viewBox", [-radius, -radius, width, width])
+        .attr("width", width)
+        .attr("height", width);
+
+    svg.append("style").text(`
+        .link { fill: none; stroke-opacity: 0.35; }
+        .link--active { stroke-opacity: 1; stroke-width: 2px; }
+        .node text { font-family: sans-serif; font-size: 10px; fill: #444; cursor: default; }
+        .node--active text { fill: #000; font-weight: 700; }
+        .node--focus text { fill: #000; font-weight: 800; text-decoration: underline; }
+    `);
+
+    const tooltip = d3.select("body")
+        .selectAll("div.airport-tooltip")
+        .data([null])
+        .join("div")
+        .attr("class", "airport-tooltip")
+        .style("position", "absolute")
+        .style("pointer-events", "none")
+        .style("background", "rgba(255,255,255,0.95)")
+        .style("border", "1px solid #ddd")
+        .style("border-radius", "6px")
+        .style("padding", "8px 10px")
+        .style("font", "12px sans-serif")
+        .style("opacity", 0);
+
+    const linksData = root.leaves().flatMap(d => d.outgoing);
+
+    const link = svg.append("g")
+        .attr("class", "links")
+        .selectAll("path")
+        .data(linksData)
+        .join("path")
+        .attr("class", "link")
+        .attr("stroke", d => airlineColor[d[2]] || colornone)
+        .attr("d", ([source, target]) => line(source.path(target)));
+
+    const nodeG = svg.append("g")
+        .attr("class", "nodes")
+        .selectAll("g")
+        .data(root.leaves())
+        .join("g")
+        .attr("class", "node")
+        .attr("transform", d => `rotate(${(d.x * 180 / Math.PI) - 90}) translate(${d.y},0)`);
+
+    const node = nodeG.append("text")
+        .attr("dy", "0.31em")
+        .attr("x", d => d.x < Math.PI ? 6 : -6)
+        .attr("text-anchor", d => d.x < Math.PI ? "start" : "end")
+        .attr("transform", d => d.x >= Math.PI ? "rotate(180)" : null)
+        .text(d => d.data.name)
+        .on("mouseover", (event, d) => overed(event, d))
+        .on("mousemove", (event, d) => moved(event, d))
+        .on("mouseout", (event, d) => outed(event, d));
+
+    function moved(event, d) {
+        // keep tooltip near cursor
+        tooltip
+            .style("left", (event.pageX + 12) + "px")
+            .style("top", (event.pageY + 12) + "px");
+    }
+
+    function overed(event, d) {
+        // Build set of directly connected nodes
+        const connected = new Set();
+        connected.add(d);
+        d.outgoing.forEach(o => connected.add(o[1]));
+        d.incoming.forEach(i => connected.add(i[0]));
+
+        // Highlight nodes
+        nodeG
+            .classed("node--active", n => connected.has(n))
+            .classed("node--focus", n => n === d);
+
+        // Highlight directly connected links (incoming or outgoing)
+        link
+            .classed("link--active", l => (l[0] === d) || (l[1] === d))
+            .raise();
+
+        // Tooltip content
+        const region = d.parent?.data?.name ?? "";
+        const incomingCount = d.incoming?.length ?? 0;
+        const outgoingCount = d.outgoing?.length ?? 0;
+
+        tooltip
+            .style("opacity", 1)
+            .html(`
+                <div style="font-weight:700; margin-bottom:4px;">${d.data.name}${region ? ` · ${region}` : ""}</div>
+                <div>Incoming routes: ${incomingCount}</div>
+                <div>Outgoing routes: ${outgoingCount}</div>
+            `);
+
+        moved(event, d);
+    }
+
+    function outed(event, d) {
+        nodeG.classed("node--active", false).classed("node--focus", false);
+        link.classed("link--active", false);
+        tooltip.style("opacity", 0);
+    }
+
+    return svg.node();
+}
+
 draw("all"); // initial draw
 
 // adapt chart visualization code from 
